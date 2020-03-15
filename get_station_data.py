@@ -156,7 +156,7 @@ def select_daily_flows_by_station_ID(conn, station):
     """
     time0 = time.time()
     query = "SELECT * FROM DLY_FLOWS WHERE STATION_NUMBER=?"
-    print(station)
+#     print(station)
     df = pd.read_sql_query(query, con=conn, params=(station,))
 
 #     column_headers = [description[0] for description in cur.description]
