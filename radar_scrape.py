@@ -23,7 +23,6 @@ urllib3.disable_warnings()
 from random import randint
 from time import sleep
 
-from multiprocessing import Process, Queue, Pool
 
 PROJECT_DIR = os.path.abspath('')
 IMG_DIR = os.path.join(PROJECT_DIR, 'data/radar_img')
