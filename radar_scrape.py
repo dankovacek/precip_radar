@@ -18,6 +18,8 @@ from selenium.common.exceptions import NoSuchElementException
 import certifi
 import urllib3
 
+from multiprocessing import Pool
+
 urllib3.disable_warnings()
 
 from random import randint
@@ -74,7 +76,7 @@ def get_images(data):
     session = requests.Session()
     r = requests.get(link)
 
-    sleep(randint(1, 10) / 1000.0)
+    sleep(randint(1, 10) / 5000.0)
 
     local_filename = link.split('&')[0].split('=')[-1]
 
