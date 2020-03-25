@@ -4,13 +4,16 @@ import json
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-import utm
+import math
+
 from PIL import Image
 import time
 import pickle
-from pyproj import Proj
+from pyproj import Proj, transform, Transformer
 from shapely.geometry import Point
 import matplotlib.pyplot as plt
+
+
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(''))))
 DB_DIR = os.path.join(BASE_DIR, 'code/hydat_db')
@@ -68,8 +71,8 @@ def find_closest_radar_stn(wsc_stn):
 # note that the radar location "centre" does not correspond to
 # the image pixel dimension centre because of the toolbar at right
 # find the centre pixel coordinates (corresponds to centre of radar img)
-img_center = (240, 240)
-# radar_px[img_center] = stn_coords_utm
+# according to the data publisher, centre is located at 239, 239
+img_center = (239, 239)
 
 # traverse the matrix and apply a cumulative subtraction
 # corresponding to the pixel distance from centre,
@@ -80,38 +83,131 @@ img_center = (240, 240)
 # the centre of the 1kmx1km square
 
 def assign_latlon_to_pixel_matrix(coords):
+    # dpp = 1 / 111.32 # roughly 1000m per pixel
+    # set a step size to the image resolution
+    img_scale = 1000 # 1 km / 1 pixel
+
+    # calculate radial distance and azimuth (AZ)
+        # euclidean distance based on cell position
+        # AZ measured from north get from inverse tangent function
+        # of v/h pixels
+
+    t1 = time.time()
+
+    stn_x = coords[1]
+    stn_y = coords[0]
+
+    p_mt = Proj('EPSG:32662') # metric
+    p_WGS84 = Proj('EPSG:4326') # WGS 84
+    p_NAD83 = Proj('EPSG:4269') # NAD83
+    p_BC = Proj('EPSG:3153')
+
+    # Project radar coordinates from WGS 84 to 3857 (metric)
+    foo_trf = Transformer.from_crs(4269, 3153, always_xy=True)
+    # img_centre = p_BC(stn_x, stn_y)
+    x_centre, y_centre = foo_trf.transform(stn_x, stn_y)
+    # img_centre = p_mt(stn_x, stn_y)
+    # img_centre1 = p_BC(stn_x, stn_y)
+    # x_centre = img_centre[0]
+    # y_centre = img_centre[1]
+    # print(img_centre)
+    # print(img_centre1)
+    # print(coords, x_centre, y_centre)
+    
+    gridpoints = []
+
     px = np.zeros((480, 480, 2))
-    df = pd.DataFrame()
-    dpp = 1 / 111.32 # roughly 1000m per pixel
-    for j in range(480): # columns
-        df[j] = [tuple((coords[0] + dpp * (i - 240), coords[1] + dpp * (j - 240))) for i in range(480)]
-    return df
+    for r in range(480):
+        t0 = time.time()
+        for c in range(480):
+            # calculate the radial distance from centre
+            # 1 px = 1km
+            # compute dx and dy centred at location 239, 239
+            dx = c - 239
+            dy = 239 - r
+            R = np.sqrt(dx**2 + dy**2)
+
+            scale = 1000
+            
+            if (dx == 0) & (dy == 0):
+                xx, yy = 0, 0
+            else:
+                if (dx <= 0) & (dy >= 0):
+                    az = math.acos(dx / R)
+                    xx = scale * R * math.cos(az)
+                    yy = scale * R * math.sin(az)
+                    
+                elif (dx <= 0) & (dy <= 0):
+                    az = math.acos(dx / R)
+                    xx = scale * R * math.cos(az)
+                    yy = scale * -1.0 * R * math.sin(az)
+                    
+                elif (dx >= 0) & (dy <= 0):
+                    az = math.asin(dx / R)
+                    xx = scale * R * math.sin(az)
+                    yy = scale * -1.0 * R * math.cos(az)
+                else:
+                    az = math.asin(dx / R)
+                    xx = scale * R * math.sin(az)
+                    yy = scale * R * math.cos(az)        
+        
+            px[r, c] = tuple((x_centre + xx, y_centre + yy))
+
+
+    
+    metric_to_wgs84_transform = Transformer.from_crs(3153, 4269, always_xy=True)
+    transformed_pts = [e for e in metric_to_wgs84_transform.itransform(np.array(px).reshape(480*480,2))]
+    x_coords = [e[0] for e in transformed_pts]
+    y_coords = [e[1] for e in transformed_pts]
+    
+    df = pd.DataFrame({'x': x_coords, 'y': y_coords})
+    df['coords'] = list(zip(df['x'], df['y']))
+    df['coords'] = df['coords'].apply(Point)
+
+    df = df[['coords']]
+
+    # print(df)
+
+    t2 = time.time()
+    print('transform time = {:.2f}'.format(t2 - t1))
+    # gridpoints = [Point(pt) for pt in transformed_pts]
+    geo_df = gpd.GeoDataFrame(df, geometry='coords')
+
+    return geo_df
 
 
 def encode_coordinate_files(radar_stn_names):
     for stn in radar_stn_names:
-        stn_coords = radar_sites[stn]['lat_lon']
-        # stn_coords_utm = utm.from_latlon(*stn_coords)
-        radar_coord_df = assign_latlon_to_pixel_matrix(stn_coords)
-        fname = PROJECT_DIR + '/data/radar_img_pixel_coords/{}_latlon_coords.json'.format(stn)
-        radar_coord_df.to_json(fname)
+        print('station: {}'.format(stn))
+        stn_coords = radar_sites[stn]['lat_lon'] # order is y, x
+        radar_coord_gdf = assign_latlon_to_pixel_matrix(stn_coords)
+
+        fname = PROJECT_DIR + '/data/radar_img_pixel_coords/{}_coords.geojson'.format(stn)
+        radar_coord_gdf.to_file(fname, driver='GeoJSON')
+        print('saved...')
+        print('')
+        # np.save(fname, allow_pickle=True)
 
 
 encode_coordinate_files(list(radar_sites.keys()))
+
+print(breasdf)
 
 def load_df(fname):
     fpath = PROJECT_DIR + '/data/radar_img_pixel_coords/' + fname
     return pd.read_json(fpath)
 
-fnames = [f for f in os.listdir(PROJECT_DIR + '/data/radar_img_pixel_coords')]
-print(fnames[0])
+fnames = os.listdir(PROJECT_DIR + '/data/radar_img_pixel_coords')
+
 # coord_pairs = load_df(fnames[0]).to_numpy().flatten()
-df = load_df(fnames[0])
-print(df.head())
+df = load_df(fnames[-1])
+
 def map_point(pt):
     return Point(pt[0], pt[1])
 
 # encode_coordinate_files(list(radar_sites.keys()))
+
+print(breakasdfasd)
 
 # coords = [map_point(p) for p in coord_pairs]
 
@@ -137,10 +233,10 @@ def map_point(pt):
 #     data = data.to_crs('epsg:4326')
 #     return data.geometry
 
-# test_stn = '08HE006'
+test_stn = '08GA072'
 
-# basin_geometry = get_polygon(test_stn)
+basin_geometry = get_polygon(test_stn)
 
-# basin_bbox = basin_geometry.bounds
+basin_bbox = basin_geometry.bounds
 
 
