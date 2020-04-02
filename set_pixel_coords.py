@@ -12,7 +12,10 @@ import pickle
 from pyproj import Proj, transform, Transformer
 from shapely.geometry import Point
 import matplotlib.pyplot as plt
+from pyproj import Geod
+from pygc import great_circle as gc
 
+from radar_station_coords import radar_sites
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(''))))
@@ -22,23 +25,7 @@ IMG_DIR = os.path.join(PROJECT_DIR, 'data/radar_img')
 
 stn_df = pd.read_csv(DB_DIR + '/WSC_Stations_Master.csv')
 
-radar_sites = {'CASAG': {'lat_lon': [49.0580516, -122.470667], # radar location code, lat/lon
-                       'scale': 1,
-                      'alt_name': 'Aldergrove',
-                        }, # km/pixel                       
-               'CASPG': {'lat_lon': [53.916943, -122.749443], # radar location code, lat/lon
-                       'scale': 1,
-                      'alt_name': 'Prince George',}, # km/pixel}, # km/pixel
-               'CASSS': {'lat_lon': [50.271790, -119.276505], # radar location code, lat/lon
-                       'scale': 1,
-                      'alt_name': 'Silver Star',}, # km/pixel}, # km/pixel
-               'CASSI': {'lat_lon': [48.407326, -123.329773], # radar location code, lat/lon
-                       'scale': 1,
-                      'alt_name': 'Victoria',}, # km/pixel}, # km/pixel
-               'CASSM': {'lat_lon': [51.206092, -113.399426],
-                        'scale': 1,
-                        'alt_name': 'Strathmore'},
-              }
+
 
 def find_closest_radar_stn(wsc_stn):
     """
@@ -53,7 +40,7 @@ def find_closest_radar_stn(wsc_stn):
     closest_stn = None
     for site in radar_sites.keys():
 
-        s2 = [*radar_sites[site]['lat_lon']]        
+        s2 = [*radar_sites[site]['lat_lon']]    
 
         this_dist = np.sqrt((s2[0] - s1[0])**2 + (s2[1] - s1[1])**2)
 
@@ -82,7 +69,7 @@ img_center = (239, 239)
 # such that the coordinate for each pixel represents 
 # the centre of the 1kmx1km square
 
-def assign_latlon_to_pixel_matrix(coords):
+def assign_latlon_to_pixel_matrix(coords, ):
     # dpp = 1 / 111.32 # roughly 1000m per pixel
     # set a step size to the image resolution
     img_scale = 1000 # 1 km / 1 pixel
@@ -94,28 +81,23 @@ def assign_latlon_to_pixel_matrix(coords):
 
     t1 = time.time()
 
-    stn_x = coords[1]
-    stn_y = coords[0]
+    # p_mt = Proj('EPSG:32662') # metric
+    # p_WGS84 = Proj('EPSG:4326') # WGS 84
+    # p_NAD83 = Proj('EPSG:4269') # NAD83
+    # p_BC = Proj('EPSG:3153')
+    # p_esri = Proj('esri:102001')
+    # p_utm = Proj('epsg:3395')
+    # p_bc2 = Proj('epsg:3005')
+    # p_sc = Proj('epsg:3347')
+    # p_utm11N = Proj('epsg:26911')
+    # p_utm12N = Proj('epsg:26912')
 
-    p_mt = Proj('EPSG:32662') # metric
-    p_WGS84 = Proj('EPSG:4326') # WGS 84
-    p_NAD83 = Proj('EPSG:4269') # NAD83
-    p_BC = Proj('EPSG:3153')
+    # projection = Proj('epsg:3005')
 
-    # Project radar coordinates from WGS 84 to 3857 (metric)
-    foo_trf = Transformer.from_crs(4269, 3153, always_xy=True)
-    # img_centre = p_BC(stn_x, stn_y)
-    x_centre, y_centre = foo_trf.transform(stn_x, stn_y)
-    # img_centre = p_mt(stn_x, stn_y)
-    # img_centre1 = p_BC(stn_x, stn_y)
-    # x_centre = img_centre[0]
-    # y_centre = img_centre[1]
-    # print(img_centre)
-    # print(img_centre1)
-    # print(coords, x_centre, y_centre)
-    
+    x_centre, y_centre = coords[1], coords[0]
+
     gridpoints = []
-
+    n = 0
     px = np.zeros((480, 480, 2))
     for r in range(480):
         t0 = time.time()
@@ -128,35 +110,40 @@ def assign_latlon_to_pixel_matrix(coords):
             R = np.sqrt(dx**2 + dy**2)
 
             scale = 1000
-            
+
             if (dx == 0) & (dy == 0):
                 xx, yy = 0, 0
             else:
                 if (dx <= 0) & (dy >= 0):
-                    az = math.acos(dx / R)
+                    az = math.acos(abs(dx) / R) + 3 * np.pi / 2
+                    bearing = math.degrees(az) 
+
                     xx = scale * R * math.cos(az)
-                    yy = scale * R * math.sin(az)
-                    
+                    yy = scale * R * math.sin(az)                    
                 elif (dx <= 0) & (dy <= 0):
-                    az = math.acos(dx / R)
+                    az = 3 * np.pi / 2 - math.acos(abs(dx) / R)
+                    bearing = math.degrees(az)
                     xx = scale * R * math.cos(az)
-                    yy = scale * -1.0 * R * math.sin(az)
-                    
+                    yy = scale * -1.0 * R * math.sin(az)                    
                 elif (dx >= 0) & (dy <= 0):
-                    az = math.asin(dx / R)
+                    az = math.asin(abs(dy) / R) + np.pi / 2
+                    bearing = math.degrees(az)                    
                     xx = scale * R * math.sin(az)
                     yy = scale * -1.0 * R * math.cos(az)
                 else:
-                    az = math.asin(dx / R)
+                    az = math.acos(dy / R)
+                    bearing = math.degrees(az)
                     xx = scale * R * math.sin(az)
-                    yy = scale * R * math.cos(az)        
-        
-            px[r, c] = tuple((x_centre + xx, y_centre + yy))
+                    yy = scale * R * math.cos(az) 
+  
+        # 
+            # px[r, c] = tuple((x_centre + xx, y_centre + yy))
 
-
+            g = Geod(ellps='WGS84')
+            lon2, lat2, bear2 = g.fwd(x_centre, y_centre, bearing, R*scale)
+            px[r, c] = tuple((lon2, lat2))
     
-    metric_to_wgs84_transform = Transformer.from_crs(3153, 4269, always_xy=True)
-    transformed_pts = [e for e in metric_to_wgs84_transform.itransform(np.array(px).reshape(480*480,2))]
+    transformed_pts = np.array(px).reshape(480 * 480, 2)
     x_coords = [e[0] for e in transformed_pts]
     y_coords = [e[1] for e in transformed_pts]
     
@@ -165,13 +152,14 @@ def assign_latlon_to_pixel_matrix(coords):
     df['coords'] = df['coords'].apply(Point)
 
     df = df[['coords']]
-
-    # print(df)
+    print('stn_loc:')
+    print(px[239, 239])
 
     t2 = time.time()
     print('transform time = {:.2f}'.format(t2 - t1))
     # gridpoints = [Point(pt) for pt in transformed_pts]
-    geo_df = gpd.GeoDataFrame(df, geometry='coords')
+    geo_df = gpd.GeoDataFrame(df, geometry='coords', crs='epsg:4326')
+    # geo_df = geo_df.to_crs('epsg:4269')
 
     return geo_df
 
