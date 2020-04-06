@@ -149,18 +149,21 @@ def assign_latlon_to_pixel_matrix(coords, ):
     
     df = pd.DataFrame({'x': x_coords, 'y': y_coords})
     df['coords'] = list(zip(df['x'], df['y']))
-    df['coords'] = df['coords'].apply(Point)
+    # df['geometry'] = [Point(e[0], e[1], crs='epsg:4326') for e in df['coords']]
+    df['geometry'] = df['coords'].apply(Point)
 
-    df = df[['coords']]
+    df = df[['geometry']]
     print('stn_loc:')
     print(px[239, 239])
+    print('image extents: {:.2f} {:.2f} {:.2f} {:.2f}'.format(np.min(x_coords), np.min(y_coords),
+          np.max(x_coords), np.max(y_coords)))
 
     t2 = time.time()
     print('transform time = {:.2f}'.format(t2 - t1))
+    print(df)
     # gridpoints = [Point(pt) for pt in transformed_pts]
-    geo_df = gpd.GeoDataFrame(df, geometry='coords', crs='epsg:4326')
+    geo_df = gpd.GeoDataFrame(df, geometry='geometry', crs='epsg:4326')
     # geo_df = geo_df.to_crs('epsg:4269')
-
     return geo_df
 
 

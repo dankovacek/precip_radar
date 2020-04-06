@@ -77,6 +77,14 @@ def get_pixel_coordinates(closest_stn):
 #     print('what is this?')
 #     print(geo_df.crs)
 #     geo_df = geo_df.to_crs('EPSG:3153')
+    print('checking radar pixel coordinate bounds')
+    geo_df['x'] = [e.x for e in geo_df['geometry'].values]
+    geo_df['y'] = [e.y for e in geo_df['geometry'].values]
+
+    print(geo_df.crs)
+
+    print('radar image extents: {:.2f} {:.2f} {:.2f} {:.2f}'.format(np.min(geo_df['x']), np.min(geo_df['y']),
+          np.max(geo_df['x']), np.max(geo_df['y'])))
     
     return geo_df
 
@@ -87,30 +95,35 @@ def get_img_mask(closest_stn, basin_geom, wsc_stn):
     # pixels that fall within the basin polygon
     # note that the points are stored in (lat, lon) tuples
     # which corresponds to y, x
-#     print('pulling geometries together...')
 
     basin_geom_data = basin_geom.geometry
     
-    mask_folder = 'data/wsc_stn_basin_masks'
-    mask_path = os.path.join(PROJECT_DIR, mask_folder)
-    mask_filename = wsc_stn + '.json'
-    existing_masks = os.listdir(mask_path)
+    # mask_folder = 'data/wsc_stn_basin_masks'
+    # mask_path = os.path.join(PROJECT_DIR, mask_folder)
+    # mask_filename = wsc_stn + '.json'
+    # existing_masks = os.listdir(mask_path)
 
-    geo_df = get_pixel_coordinates(closest_stn)
+    radar_pixel_coord_df = get_pixel_coordinates(closest_stn)
 
-    pip_mask = geo_df.within(basin_geom.loc[0, 'geometry'])
+    # trim the radar image df to the bounds of the watershed 
+    # to make the .within() function more efficient
+    minx, miny, maxx, maxy = basin_geom.bounds.values[0]
+    radar_pixel_coord_df = radar_pixel_coord_df[(radar_pixel_coord_df['x'] > minx) & \
+                                                (radar_pixel_coord_df['x'] < maxx) & \
+                                                (radar_pixel_coord_df['y'] > miny) & \
+                                                (radar_pixel_coord_df['y'] < maxy) ]
 
-    masked_df = geo_df.loc[pip_mask, :]
-    # print(masked_df['geometry'].values)
-    # print(masked_df['geometry'])
-    # print([e.x for e in masked_df['geometry'].values])
+    pip_mask = radar_pixel_coord_df.within(basin_geom.loc[0, 'geometry'])
+
+    masked_df = radar_pixel_coord_df.loc[pip_mask, :]
+
     xs = [e.x for e in masked_df['geometry'].values]
     ys = [e.y for e in masked_df['geometry'].values]
 
     df = pd.DataFrame()
     df['x'] = xs
     df['y'] = ys
-    df['geometry'] = masked_df.values
+    df['geometry'] = masked_df['geometry'].values
 
     return df, pip_mask
 
@@ -121,8 +134,20 @@ def get_polygon(stn):
     data = gpd.read_file(gdb_path, driver='FileGDB', layer='EC_{}_1'.format(stn))
     return data
 
+def get_polygon1(stn):
+    gdb_path = os.path.join(PROJECT_DIR, 'data/basin_geometry_data.geojson')
+    data = gpd.read_file(gdb_path)
+    basin_geom = data[data['Station'] == stn]
+    print(basin_geom)
+    print(basin_geom.crs)
+    basin_geom = basin_geom.to_crs(4326)
+    print(basin_geom.crs)
+    print(asdfasd)
+    return data
+
+
 def get_basin_geometry(test_stn):
-    basin_geom = get_polygon(test_stn)
+    basin_geom = get_polygon1(test_stn)
     # reproject to EPSG: 3395 (mercator) for plotting
     # or to coincide with radar image coordinates use
     # original WSC basin polygon is EPSG: 4269 (NAD83)
@@ -155,8 +180,13 @@ def load_dem_data(basin_geom):
     return dem_df
 
 i = 0
+# need to get 70 - 08MC045; 101 08KH019
+last_stations = ['08KH019', '08MC045']
 for wsc_stn in all_stations_with_geometry[:1]:
     i += 1
+    stn_info = stn_df[stn_df['Station Number'] == wsc_stn]
+    print(stn_info[['Latitude', 'Longitude']])
+    print(stn_info['Station Name'])
 
     print('{}/{} {} Starting...'.format(i, len(all_stations_with_geometry), wsc_stn))
 
@@ -166,24 +196,14 @@ for wsc_stn in all_stations_with_geometry[:1]:
     # load the shape file containing the catchment boundary
     basin_bounds_geom = get_basin_geometry(wsc_stn)
     t1 = time.time()
-    print('    ...time to load radar and basin geom: {:.2f}'.format(t1 - t0))
+    print('    ...time to load radar ({}) and basin geom: {:.2f}'.format(radar_stn, t1 - t0))
     
     # get the coordinates of all of the radar image pixels
     # that fall inside the catchment boundary
     basin_coords, catchment_mask = get_img_mask(radar_stn, basin_bounds_geom, wsc_stn)    
 
-    t2 = time.time()
-
-    print('    ...time to get image mask and basin df: {:.2f}'.format(t2 - t1))    
-
     # load the dem and clip it to the catchment boundary bounds
     dem_data = load_dem_data(basin_bounds_geom) 
-
-    # print(dem_data)
-    foo = dem_data['elevation'].isnull()
-    # print(foo)
-    t3 = time.time()
-    print('    ...time to load the dem data: {:.2f}'.format(t3 - t2))    
 
     tree = BallTree(dem_data[['x', 'y']].values, leaf_size=2)
 
@@ -202,3 +222,8 @@ for wsc_stn in all_stations_with_geometry[:1]:
     df_save_path = os.path.join(PROJECT_DIR, 'data/basin_pixel_coords_els/{}.csv'.format(wsc_stn))
 
     basin_coords.to_csv(df_save_path)
+
+    t2 = time.time()
+
+    print('    ...time to get image mask, basin df and dem, save output.: {:.2f}'.format(t2 - t1)) 
+    print('    ###############')
