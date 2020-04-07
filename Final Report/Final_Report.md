@@ -110,7 +110,11 @@ Vestiges of the information layer are apparent in some of the basins in [Figure 
 
 ![Qualitative Representation of Spatial Distributions of Precipitation in Basins of Western Canada](img/spatial_precip_art1.png){#Fig10}
 
+The [Pysheds](https://mattbartos.com/pysheds/) Python package [@pysheds] is used to facilitate the batch processing of radar image masking.
 
+[@Loukas_1994] estimated precipitation lapse rate in the Seymour and Capilano basins, and found no functional relationship between *annual* precipitation and the distance from the beginning of the slope.  
+
+[@precip_elevation_1973] investigated the effect of elevation on summer precipitation and found a rate of 7% increase per 100m elevation increase in the Santa Catalina Mountains of Arizona.
 
 ## Hydrograph Reconstruction
 
